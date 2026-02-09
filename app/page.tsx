@@ -1,63 +1,120 @@
-import Image from "next/image";
-
+"use client";
+import { useRef, useEffect, useState } from "react";
+import * as faceapi from "face-api.js";
 export default function Home() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [height, setHeight] = useState(720);
+  const MODEL_URL =
+    process.env.NEXT_PUBLIC_FACEAPI_MODEL_URL ||
+    "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
+  const constraints = {
+    video: {
+      width: 1280,
+      height: height,
+      frameRate: 60,
+      facingMode: "user",
+      rotate: 180,
+    },
+    audio: false,
+  }
+  let interval: NodeJS.Timeout;
+
+  useEffect(() => {
+    const updateConstraints = () => {
+      const isMobile = window.innerWidth < 768;
+      setHeight(isMobile ? 1280 : 720);
+    };
+    updateConstraints();
+    window.addEventListener("resize", updateConstraints);
+
+    const loadModels = async () => {
+      Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+      ]).then(() => {
+        startVideo();
+      }).catch(error => {
+        console.error("Error loading models:", error);
+      });
+    }
+    loadModels();
+    return () => {
+      window.removeEventListener("resize", updateConstraints);
+      if (interval) {
+        clearInterval(interval);
+      }
+      const stream = videoRef.current?.srcObject as MediaStream;
+      if (stream) {
+        const tracks = stream.getTracks();
+        tracks.forEach(track => track.stop());
+      }
+    }
+  }, [])
+
+  const startVideo =() => {
+    const video = videoRef.current;
+    
+    if (video) {
+      navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+        video.srcObject = stream;
+      }).catch(error => {
+        console.error("Error accessing camera:", error);
+      });
+
+      video.onloadedmetadata = () => {
+        video.play();
+        canvasSetup(video);
+      }
+       
+    }
+  }
+
+  const canvasSetup = (video: HTMLVideoElement) => {
+    const canvas = faceapi.createCanvasFromMedia(video);
+    canvas.className = "absolute inset-0 w-full h-full rounded-2xl pointer-events-none";
+
+    video.parentNode?.appendChild(canvas);
+    const displaySize = { width: video.videoWidth, height: video.videoHeight };
+
+    if (!displaySize.width || !displaySize.height) {
+      return;
+    }
+
+    canvas.width = displaySize.width;
+    canvas.height = displaySize.height;
+    faceapi.matchDimensions(canvas, displaySize);
+
+    interval = setInterval(async () => {
+      const detections = await faceapi.detectAllFaces(
+        video,
+        new faceapi.TinyFaceDetectorOptions()
+      ).withFaceLandmarks().withFaceExpressions();
+      const resizedDetections = faceapi.resizeResults(detections, displaySize);
+      canvas?.getContext("2d")?.clearRect(0 ,0, canvas.width, canvas.height);
+      faceapi.draw.drawDetections(canvas, resizedDetections);
+      faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
+    }, 100)
+  }
+  
+
+  
+
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+    <div className="min-h-screen bg-linear-to-br from-slate-50 via-indigo-50 to-sky-100 text-slate-900">
+      <main className="mx-auto max-w-4xl px-4 pb-16 pt-10 text-center sm:px-6 sm:pb-24 sm:pt-16">
+        <h1 className="mb-5 text-3xl font-bold uppercase tracking-[0.12em] text-transparent bg-clip-text bg-linear-to-r from-sky-600 via-violet-600 to-fuchsia-600 sm:mb-6 sm:text-4xl sm:tracking-[0.2em]">
+          FaceApp
+        </h1>
+        <div className="relative mx-auto w-full max-w-[860px]">
+          <video
+            autoPlay
+            ref={videoRef}
+            className="w-full h-[72vh] max-h-none rounded-2xl border border-slate-900/10 bg-white/80 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_0_0_1px_rgba(59,130,246,0.18),0_0_50px_rgba(125,211,252,0.25)] sm:h-auto sm:max-h-[70vh] md:max-h-screen"
+          />
         </div>
       </main>
     </div>
