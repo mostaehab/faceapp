@@ -11,7 +11,7 @@ export default function Home() {
     video: {
       width: 1280,
       height: height,
-      frameRate: 60,
+      frameRate: 120,
       facingMode: "user",
       rotate: 180,
     },
